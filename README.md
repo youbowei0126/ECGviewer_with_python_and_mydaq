@@ -38,7 +38,7 @@ pip install numpy matplotlib nidaqmx psutil
 ```
 
 
-> 注意：建議使用虛擬環境安裝 `numpy`、`matplotlib`、`psutil` 等套件。但 `nidaqmx` 建議直接安裝於 base（全域）環境
+> 注意：可使用虛擬環境安裝 `numpy`、`matplotlib`、`psutil` 等套件。但 `nidaqmx` 建議直接安裝於 base（全域）環境
 
 
 ## 3. 設定參數
