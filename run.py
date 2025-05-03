@@ -36,7 +36,8 @@ max_bpm = config["max_bpm"]  # 最大BPM上限
 min_bpm = config["min_bpm"]  # 最小BPM上限
 fft_freq_range = tuple(config["fft_freq_range"])  # fft顯示頻率範圍
 fft_amp_range = tuple(config["fft_amp_range"])  # fft顯示震幅範圍
-filtered_data_baseline = config["filtered_data_baseline"] # 濾波過後的頻率要顯示的位移
+show_filtered_data = config["show_filtered_data"]  # 是否顯示濾波後的資料
+filtered_data_baseline = config["filtered_data_baseline"]  # 濾波過後的頻率要顯示的位移
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -237,7 +238,9 @@ def update(frame):
         # 新增：在 min_bpm~max_bpm 對應的頻率區間加上半透明底色
         min_freq_band = min_bpm / 60.0
         max_freq_band = max_bpm / 60.0
-        ax_fft.axvspan(min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range")
+        ax_fft.axvspan(
+            min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range"
+        )
 
         ax_fft.plot(pos_freqs, pos_signal_fft)
         ax_fft.set_title("FFT Frequency Spectrum")
@@ -251,7 +254,6 @@ def update(frame):
         max_index = pos_signal_fft.argmax()
         main_freq = pos_freqs[max_index]
         ax_fft.scatter([main_freq], [pos_signal_fft[max_index]], s=50)
-
 
         if (
             (time.time_ns() - pause_time > average_delay_time * 1e9)
@@ -267,42 +269,43 @@ def update(frame):
         bpm_display.set_text(f"BPM: {zero_cross_freq*60:.2f}")
 
     # 新增：畫出filtered資料
-    if not hasattr(update, "filtered_line"):
-        # 第一次呼叫時建立filtered的線，並上移filtered_data_baseline
-        (update.filtered_line,) = ax.plot(
-            x_axis[-len(filtered) :],
-            filtered + filtered_data_baseline,
-            lw=1,
-            color="orange",
-            label="Filtered",
-        )
-        # 畫出filtered base line（filtered_data_baseline）並用虛線
-        (update.filtered_baseline,) = ax.plot(
-            x_axis[-len(filtered) :],
-            np.full_like(filtered, filtered_data_baseline),
-            lw=1,
-            color="orange",
-            linestyle="--",
-            label="Filtered base",
-        )
-        ax.legend()
-    else:
-        update.filtered_line.set_ydata(
-            np.pad(
+    if show_filtered_data:
+        if not hasattr(update, "filtered_line"):
+            # 第一次呼叫時建立filtered的線，並上移filtered_data_baseline
+            (update.filtered_line,) = ax.plot(
+                x_axis[-len(filtered) :],
                 filtered + filtered_data_baseline,
-                (len(raw) - len(filtered), 0),
-                "constant",
-                constant_values=np.nan,
+                lw=1,
+                color="orange",
+                label="Filtered",
             )
-        )
-        update.filtered_baseline.set_ydata(
-            np.pad(
+            # 畫出filtered base line（filtered_data_baseline）並用虛線
+            (update.filtered_baseline,) = ax.plot(
+                x_axis[-len(filtered) :],
                 np.full_like(filtered, filtered_data_baseline),
-                (len(raw) - len(filtered), 0),
-                "constant",
-                constant_values=np.nan,
+                lw=1,
+                color="orange",
+                linestyle="--",
+                label="Filtered base",
             )
-        )
+            ax.legend()
+        else:
+            update.filtered_line.set_ydata(
+                np.pad(
+                    filtered + filtered_data_baseline,
+                    (len(raw) - len(filtered), 0),
+                    "constant",
+                    constant_values=np.nan,
+                )
+            )
+            update.filtered_baseline.set_ydata(
+                np.pad(
+                    np.full_like(filtered, filtered_data_baseline),
+                    (len(raw) - len(filtered), 0),
+                    "constant",
+                    constant_values=np.nan,
+                )
+            )
 
     return line, freq_text, bpm_display
 
