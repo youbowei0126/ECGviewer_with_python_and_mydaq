@@ -1,0 +1,13 @@
+{
+    "device_chan": "myDAQ1_youyouyou/ai0",
+    "fs": 10000.0,
+    "record_len": 30000,
+    "chunk_size": 500,
+    "buffer_size": 60000,
+    "mem_threshold_mb": 200,
+    "average_delay_time": 5,
+    "max_bpm": 220,
+    "min_bpm": 30,
+    "fft_freq_range": [0.1, 10000.0],
+    "fft_amp_range": [0.01, 10000.0]
+}
