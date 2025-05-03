@@ -9,5 +9,6 @@
     "max_bpm": 220,
     "min_bpm": 30,
     "fft_freq_range": [0.1, 10000.0],
-    "fft_amp_range": [0.01, 10000.0]
+    "fft_amp_range": [0.01, 100000.0],
+    "filtered_data_baseline": 2.5
 }

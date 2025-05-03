@@ -11,14 +11,16 @@ from nidaqmx.constants import AcquisitionType
 import psutil
 from matplotlib.widgets import Button
 
+
 # --- config 載入 ---
 def load_config(config_path="config.json"):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(base_dir, config_path)
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+        raise FileNotFoundError(f"找不到設定檔: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 config = load_config()
 
@@ -34,6 +36,7 @@ max_bpm = config["max_bpm"]  # 最大BPM上限
 min_bpm = config["min_bpm"]  # 最小BPM上限
 fft_freq_range = tuple(config["fft_freq_range"])  # fft顯示頻率範圍
 fft_amp_range = tuple(config["fft_amp_range"])  # fft顯示震幅範圍
+filtered_data_baseline = config["filtered_data_baseline"] # 濾波過後的頻率要顯示的位移
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -65,7 +68,7 @@ def read_worker(stop_event):
                         number_of_samples_per_channel=chunk_size, timeout=1.0
                     )
                 except Exception as e:
-                    print("Read error, terminating read thread:", e)
+                    print("讀取錯誤，終止讀取執行緒：", e)
                     break
                 with buffer_lock:
                     data_buffer.extend(chunk)
@@ -166,7 +169,7 @@ def update(frame):
         with buffer_lock:
             data_buffer.clear()
             data_buffer.extend([0.0] * record_len)
-        print(f"[Warning] Memory usage {mem_mb:.1f} MB exceeds threshold, buffer cleared")
+        print(f"[警告] 記憶體 {mem_mb:.1f} MB 超過阈值，已清空緩衝區")
         freq_cum_sum, freq_cum_count = 0, 0
         return line, freq_text, bpm_display
 
@@ -183,33 +186,34 @@ def update(frame):
 
     line.set_ydata(raw)
 
-    # 頻率估計
-    """
-    detrended = raw_3s - np.mean(raw_3s)
+    # 設定理想濾波器，只保留 min_bpm~max_bpm 範圍內的頻率分量
+    min_freq = min_bpm / 60.0
+    max_freq = max_bpm / 60.0
+    # FFT
+    N = len(raw_3s)
+    fft_data = np.fft.fft(raw_3s)
+    freqs = np.fft.fftfreq(N, d=1 / fs)
+    # 建立理想濾波器遮罩
+    mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
+    fft_data_filtered = fft_data * mask
+    # IFFT 回時域
+    filtered = np.fft.ifft(fft_data_filtered).real
+
+    # 計算過零點頻率
+    detrended = filtered - np.mean(filtered)
     crossings = np.where((detrended[:-1] < 0) & (detrended[1:] >= 0))[0]
-    if len(crossings) >= 2:
-        diffs = np.diff(crossings)
-        freqs = fs / diffs
-        freq_est = np.mean(freqs)
-        freq_std = np.std(freqs)
+    # 計算過零點頻率
+    detrended = filtered - np.mean(filtered)
+    crossings = np.where((detrended[:-1] < 0) & (detrended[1:] >= 0))[0]
 
-        if (
-            running
-            and (time.time_ns() - pause_time > average_delay_time * 1e9)
-            and freq_est < max_bpm / 60.0
-        ):
-            freq_cum_sum += freq_est
-            freq_cum_count += 1
-        freq_avg = freq_cum_sum / freq_cum_count if freq_cum_count > 0 else 0.0
-
-        freq_text.set_text(
-            f"Freq: {freq_est:.4f} Hz ± {freq_std:.4f} Hz\nAvg: {freq_avg:.4f} Hz\nBPM: {freq_est*60:.2f}\nAvg_BPM: {freq_avg*60:.2f}"
-        )
-        bpm_display.set_text(f"BPM: {freq_est*60:.2f}")
+    # 利用 crossings 計算頻率
+    if len(crossings) > 1:
+        period = (
+            (crossings[-1] - crossings[0]) / (len(crossings) - 1) / fs
+        )  # 平均週期（秒）
+        zero_cross_freq = 1.0 / period if period > 0 else 0.0
     else:
-        freq_text.set_text("Freq: -- Hz")
-        bpm_display.set_text("BPM: --")"""
-
+        zero_cross_freq = 0.0
     # 計算FFT，僅使用前三秒的資料
     if running:  # 僅在開始時更新FFT
         N = len(raw_3s)
@@ -229,6 +233,12 @@ def update(frame):
 
         # 畫出FFT頻譜
         ax_fft.clear()  # 清除上一輪的圖形
+
+        # 新增：在 min_bpm~max_bpm 對應的頻率區間加上半透明底色
+        min_freq_band = min_bpm / 60.0
+        max_freq_band = max_bpm / 60.0
+        ax_fft.axvspan(min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range")
+
         ax_fft.plot(pos_freqs, pos_signal_fft)
         ax_fft.set_title("FFT Frequency Spectrum")
         ax_fft.set_xlabel("Frequency (Hz)")
@@ -242,18 +252,57 @@ def update(frame):
         main_freq = pos_freqs[max_index]
         ax_fft.scatter([main_freq], [pos_signal_fft[max_index]], s=50)
 
+
         if (
             (time.time_ns() - pause_time > average_delay_time * 1e9)
-            and main_freq < max_bpm / 60.0
-            and main_freq > min_bpm / 60.0
+            and zero_cross_freq < max_bpm / 60.0
+            and zero_cross_freq > min_bpm / 60.0
         ):
-            freq_cum_sum += main_freq
+            freq_cum_sum += zero_cross_freq
             freq_cum_count += 1
         freq_avg = freq_cum_sum / freq_cum_count if freq_cum_count > 0 else 0.0
         freq_text.set_text(
-            f"Freq: {main_freq:.4f} Hz\nAvg: {freq_avg:.4f} Hz\nBPM: {main_freq*60:.2f}\nAvg_BPM: {freq_avg*60:.2f}"
+            f"Freq: {zero_cross_freq:.4f} Hz\nAvg: {freq_avg:.4f} Hz\nBPM: {zero_cross_freq*60:.2f}\nAvg_BPM: {freq_avg*60:.2f}"
         )
-        bpm_display.set_text(f"BPM: {main_freq*60:.2f}")
+        bpm_display.set_text(f"BPM: {zero_cross_freq*60:.2f}")
+
+    # 新增：畫出filtered資料
+    if not hasattr(update, "filtered_line"):
+        # 第一次呼叫時建立filtered的線，並上移filtered_data_baseline
+        (update.filtered_line,) = ax.plot(
+            x_axis[-len(filtered) :],
+            filtered + filtered_data_baseline,
+            lw=1,
+            color="orange",
+            label="Filtered",
+        )
+        # 畫出filtered base line（filtered_data_baseline）並用虛線
+        (update.filtered_baseline,) = ax.plot(
+            x_axis[-len(filtered) :],
+            np.full_like(filtered, filtered_data_baseline),
+            lw=1,
+            color="orange",
+            linestyle="--",
+            label="Filtered base",
+        )
+        ax.legend()
+    else:
+        update.filtered_line.set_ydata(
+            np.pad(
+                filtered + filtered_data_baseline,
+                (len(raw) - len(filtered), 0),
+                "constant",
+                constant_values=np.nan,
+            )
+        )
+        update.filtered_baseline.set_ydata(
+            np.pad(
+                np.full_like(filtered, filtered_data_baseline),
+                (len(raw) - len(filtered), 0),
+                "constant",
+                constant_values=np.nan,
+            )
+        )
 
     return line, freq_text, bpm_display
 
@@ -267,4 +316,3 @@ try:
 finally:
     stop_event.set()
     reader.join()
-
