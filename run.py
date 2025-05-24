@@ -49,6 +49,7 @@ fft_freq_range = tuple(config["fft_freq_range"])  # fft顯示頻率範圍
 fft_amp_range = tuple(config["fft_amp_range"])  # fft顯示震幅範圍
 show_filtered_data = config["show_filtered_data"]  # 是否顯示濾波後的資料
 filtered_data_baseline = config["filtered_data_baseline"]  # 濾波過後的頻率要顯示的位移
+show_filtered_fft=config["show_filtered_fft"]
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -229,16 +230,22 @@ def show_settings():
     entries["filtered_data_baseline"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
+    show_filtered_fft_var = tk.BooleanVar(value=getattr(config, "show_filtered_fft", True))
+    ttk.Label(scrollable_frame, text="Show Filtered FFT in Spectrum:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    entries["show_filtered_fft"] = ttk.Checkbutton(scrollable_frame, variable=show_filtered_fft_var)
+    entries["show_filtered_fft"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
     button_frame = ttk.Frame(root)
     button_frame.pack(fill=tk.X, padx=10, pady=10)
     
-    def restart_program():
-        root.destroy()
-        plt.close('all')
-        stop_event.set()
-        reader.join()
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+    # def restart_program():
+    #     root.destroy()
+    #     plt.close('all')
+    #     stop_event.set()
+    #     reader.join()
+    #     python = sys.executable
+    #     os.execl(python, python, *sys.argv)
 
     def save_settings():
         try:
@@ -254,8 +261,9 @@ def show_settings():
                 "min_bpm": int(entries["min_bpm"].get()),
                 "fft_freq_range": [float(entries["fft_freq_min"].get()), float(entries["fft_freq_max"].get())],
                 "fft_amp_range": [float(entries["fft_amp_min"].get()), float(entries["fft_amp_max"].get())],
+                "show_filtered_data": show_filter_var.get(),
                 "filtered_data_baseline": float(entries["filtered_data_baseline"].get()),
-                "show_filtered_data": show_filter_var.get()
+                "show_filtered_fft": show_filtered_fft_var.get()
             }
             
             # 儲存設定到 config.json
@@ -462,12 +470,17 @@ def update(frame):
         pos_freqs = freqs[: N // 2]
         pos_signal_fft = np.abs(signal_fft[: N // 2])
 
+        # 新增：計算濾波後的頻譜
+        filtered_fft = np.fft.fft(filtered)
+        pos_filtered_fft = np.abs(filtered_fft[: N // 2])
+
         # 限制顯示範圍，最大頻率為 max_f
         min_f = fft_freq_range[0]
         max_f = fft_freq_range[1]
         valid_indices = (pos_freqs >= min_f) & (pos_freqs <= max_f)
         pos_freqs = pos_freqs[valid_indices]
         pos_signal_fft = pos_signal_fft[valid_indices]
+        pos_filtered_fft = pos_filtered_fft[valid_indices]
 
         # 畫出FFT頻譜
         ax_fft.clear()  # 清除上一輪的圖形
@@ -479,7 +492,9 @@ def update(frame):
             min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range"
         )
 
-        ax_fft.plot(pos_freqs, pos_signal_fft)
+        ax_fft.plot(pos_freqs, pos_signal_fft, label="Raw FFT")
+        if show_filtered_fft:
+            ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="green", linestyle="--")
         ax_fft.set_title("FFT Frequency Spectrum")
         ax_fft.set_xlabel("Frequency (Hz)")
         ax_fft.set_ylabel("Magnitude")
@@ -487,6 +502,7 @@ def update(frame):
         ax_fft.loglog()
         ax_fft.set_ylim(*fft_amp_range)
         ax_fft.grid(which="minor", axis="both", linestyle=":")
+        ax_fft.legend()
         # find main_freq
         if len(pos_signal_fft) > 0:
             max_index = pos_signal_fft.argmax()
