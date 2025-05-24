@@ -18,5 +18,7 @@
     ],
     "show_filtered_data": true,
     "filtered_data_baseline": 2.5,
-    "show_filtered_fft": true
+    "show_filtered_fft": true,
+    "filter_type": "low_pass",
+    "remove_dc": true
 }

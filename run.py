@@ -50,6 +50,8 @@ fft_amp_range = tuple(config["fft_amp_range"])  # fft顯示震幅範圍
 show_filtered_data = config["show_filtered_data"]  # 是否顯示濾波後的資料
 filtered_data_baseline = config["filtered_data_baseline"]  # 濾波過後的頻率要顯示的位移
 show_filtered_fft=config["show_filtered_fft"]
+filter_type = config.get("filter_type", "band_pass")  # 預設為帶通濾波器
+remove_dc= config.get("remove_dc", True)  # 是否移除直流成分（零頻率）
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -103,7 +105,7 @@ def show_settings():
     # 建立設定視窗
     root = tk.Tk()
     root.title("Setting")
-    root.geometry("800x1000")
+    root.geometry("800x1200")
     
     main_frame = ttk.Frame(root, padding=10)
     main_frame.pack(fill=tk.BOTH, expand=True)
@@ -236,6 +238,23 @@ def show_settings():
     entries["show_filtered_fft"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
+    ttk.Label(scrollable_frame, text="Filter Type:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    filter_options = ["low_pass", "high_pass", "band_pass", "band_stop"]
+    filter_type_var = tk.StringVar(value=filter_type)
+    entries["filter_type"] = ttk.Combobox(scrollable_frame, values=filter_options, textvariable=filter_type_var, width=15)
+    entries["filter_type"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
+    # 新增參數
+    remove_dc = config.get("remove_dc", True)
+
+    # 在設定視窗加入選項
+    remove_dc_var = tk.BooleanVar(value=remove_dc)
+    ttk.Label(scrollable_frame, text="Remove DC (zero frequency):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    entries["remove_dc"] = ttk.Checkbutton(scrollable_frame, variable=remove_dc_var)
+    entries["remove_dc"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
     button_frame = ttk.Frame(root)
     button_frame.pack(fill=tk.X, padx=10, pady=10)
     
@@ -263,7 +282,10 @@ def show_settings():
                 "fft_amp_range": [float(entries["fft_amp_min"].get()), float(entries["fft_amp_max"].get())],
                 "show_filtered_data": show_filter_var.get(),
                 "filtered_data_baseline": float(entries["filtered_data_baseline"].get()),
-                "show_filtered_fft": show_filtered_fft_var.get()
+                "show_filtered_fft": show_filtered_fft_var.get(),
+                "filter_type": entries["filter_type"].get(),  # 新增濾波器類型
+                "remove_dc": remove_dc_var.get(),
+
             }
             
             # 儲存設定到 config.json
@@ -435,15 +457,35 @@ def update(frame):
 
     line.set_ydata(raw)
 
-    # 設定理想濾波器，只保留 min_bpm~max_bpm 範圍內的頻率分量
+    # 設定各種濾波器，根據 filter_type 決定使用哪種濾波器
     min_freq = min_bpm / 60.0
     max_freq = max_bpm / 60.0
     # FFT
     N = len(raw_3s)
     fft_data = np.fft.fft(raw_3s)
     freqs = np.fft.fftfreq(N, d=1 / fs)
-    # 建立理想濾波器遮罩
-    mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
+    
+    # 根據濾波器類型建立不同的遮罩
+    if filter_type == "low_pass":
+        # 低通濾波器 - 只保留低於 max_freq 的頻率
+        mask = np.abs(freqs) <= max_freq
+    elif filter_type == "high_pass":
+        # 高通濾波器 - 只保留高於 min_freq 的頻率
+        mask = np.abs(freqs) >= min_freq
+    elif filter_type == "band_pass":
+        # 帶通濾波器 - 只保留 min_freq 到 max_freq 之間的頻率
+        mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
+    elif filter_type == "band_stop":
+        # 帶阻濾波器 - 去除 min_freq 到 max_freq 之間的頻率
+        mask = (np.abs(freqs) <= min_freq) | (np.abs(freqs) >= max_freq)
+    else:
+        # 預設為帶通
+        mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
+    
+    # 新增：去除直流成分（零頻率）
+    if remove_dc:
+        mask = mask & (freqs != 0)
+
     fft_data_filtered = fft_data * mask
     # IFFT 回時域
     filtered = np.fft.ifft(fft_data_filtered).real
@@ -494,7 +536,7 @@ def update(frame):
 
         ax_fft.plot(pos_freqs, pos_signal_fft, label="Raw FFT")
         if show_filtered_fft:
-            ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="green", linestyle="--")
+            ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="red", linestyle="--",lw=3)
         ax_fft.set_title("FFT Frequency Spectrum")
         ax_fft.set_xlabel("Frequency (Hz)")
         ax_fft.set_ylabel("Magnitude")
