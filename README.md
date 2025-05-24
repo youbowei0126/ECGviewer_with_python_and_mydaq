@@ -38,6 +38,8 @@ pip install numpy matplotlib nidaqmx psutil
 
 [參考影片](https://www.youtube.com/watch?v=hQMl3SHMLjg)
 
+> 建議將 `nidaqmx` 套件直接安裝於 base（全域）環境，其餘可用虛擬環境安裝。
+
 ### 4. 參數設定
 
 請編輯 [`config.json`](config.json) 檔案，調整硬體通道（`device_chan`）、取樣率（`fs`）、FFT 範圍等參數。
@@ -89,6 +91,8 @@ pip install numpy matplotlib nidaqmx psutil
 ```
 
 [reference video](https://www.youtube.com/watch?v=hQMl3SHMLjg)
+
+> It is recommended to install the `nidaqmx` package directly in the base (global) environment. Other packages can be installed in a virtual environment.
 
 ### 4. Configuration Parameters
 
