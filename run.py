@@ -12,6 +12,8 @@ import psutil
 from matplotlib.widgets import Button
 import tkinter as tk
 from tkinter import ttk, messagebox
+import sys
+import subprocess
 
 
 # --- config 載入 ---
@@ -230,6 +232,14 @@ def show_settings():
     button_frame = ttk.Frame(root)
     button_frame.pack(fill=tk.X, padx=10, pady=10)
     
+    def restart_program():
+        root.destroy()
+        plt.close('all')
+        stop_event.set()
+        reader.join()
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
     def save_settings():
         try:
             new_config = {
@@ -271,18 +281,22 @@ def show_settings():
             filtered_data_baseline = new_config["filtered_data_baseline"]
             window_time = record_len / fs
 
-            messagebox.showinfo("Success", "Settings saved! Please restart the program to apply all changes.")
-            root.destroy()
-            
-            # 如果之前在運行，就重新啟動
-            if was_running:
-                toggle(None)
-                
+            # Show info, then ask if user wants to restart
+            if messagebox.askyesno("Success", "Settings saved! Do you want to restart the program now?"):
+                root.destroy()
+                plt.close('all')
+                stop_event.set()
+                reader.join()
+                python = sys.executable
+                os.execl(python, python, *sys.argv)
+            else:
+                root.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Error occurred while saving settings: {str(e)}")
 
     ttk.Button(button_frame, text="Save", command=save_settings).pack(side=tk.RIGHT, padx=5)
     ttk.Button(button_frame, text="Cancel", command=root.destroy).pack(side=tk.RIGHT, padx=5)
+    # 移除 btn_restart，因為重啟功能已移到 messagebox
 
     root.mainloop()
 
