@@ -6,8 +6,8 @@
     "buffer_size": 60000,
     "mem_threshold_mb": 200,
     "average_delay_time": 5,
-    "frequence_upper": 2.0,
-    "frequence_lower": 0.5,
+    "frequence_upper": 10.0,
+    "frequence_lower": 1.0,
     "fft_freq_range": [
         0.1,
         10000.0
@@ -17,8 +17,11 @@
         100000.0
     ],
     "show_filtered_data": true,
-    "filtered_data_baseline": 2.5,
+    "filtered_data_baseline": 2.0,
     "show_filtered_fft": true,
     "filter_type": "low_pass",
-    "remove_dc": true
+    "remove_dc": true,
+    "filter_model": "butterworth",
+    "butter_order": 4,
+    "ma_n": 10
 }
