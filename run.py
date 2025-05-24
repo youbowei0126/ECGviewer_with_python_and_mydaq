@@ -43,8 +43,11 @@ chunk_size = config["chunk_size"]  # 每次讀取點數
 buffer_size = config["buffer_size"]  # 硬體緩衝大小
 mem_threshold_mb = config["mem_threshold_mb"]  # 記憶體上限
 average_delay_time = config["average_delay_time"]  # 幾秒後開始計算平均
-max_bpm = config["max_bpm"]  # 最大BPM上限
-min_bpm = config["min_bpm"]  # 最小BPM上限
+frequence_upper = config["frequence_upper"]  # 頻率上限
+frequence_lower = config["frequence_lower"]  # 頻率下限
+
+max_bpm = frequence_upper*60  # 最大BPM上限
+min_bpm = frequence_lower*60  # 最小BPM上限
 fft_freq_range = tuple(config["fft_freq_range"])  # fft顯示頻率範圍
 fft_amp_range = tuple(config["fft_amp_range"])  # fft顯示震幅範圍
 show_filtered_data = config["show_filtered_data"]  # 是否顯示濾波後的資料
@@ -178,12 +181,6 @@ def show_settings():
     entries["average_delay_time"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
-    ttk.Label(scrollable_frame, text="Max BPM:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    entries["max_bpm"] = ttk.Entry(scrollable_frame, width=15)
-    entries["max_bpm"].insert(0, str(max_bpm))
-    entries["max_bpm"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
-    row += 1
-
     ttk.Label(scrollable_frame, text="Min BPM:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
     entries["min_bpm"] = ttk.Entry(scrollable_frame, width=15)
     entries["min_bpm"].insert(0, str(min_bpm))
@@ -217,6 +214,28 @@ def show_settings():
     entries["fft_amp_max"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
+    # Filter Type
+    ttk.Label(scrollable_frame, text="Filter Type:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    filter_options = ["low_pass", "high_pass", "band_pass", "band_stop"]
+    filter_type_var = tk.StringVar(value=filter_type)
+    entries["filter_type"] = ttk.Combobox(scrollable_frame, values=filter_options, textvariable=filter_type_var, width=15)
+    entries["filter_type"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
+    # 新增 frequence_upper (Hz) 在 filter 下方
+    ttk.Label(scrollable_frame, text="Frequency Upper (Hz):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    entries["frequence_upper"] = ttk.Entry(scrollable_frame, width=15)
+    entries["frequence_upper"].insert(0, str(frequence_upper))
+    entries["frequence_upper"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
+    # 新增 frequence_lower (Hz) 在 filter 下方
+    ttk.Label(scrollable_frame, text="Frequency Lower (Hz):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    entries["frequence_lower"] = ttk.Entry(scrollable_frame, width=15)
+    entries["frequence_lower"].insert(0, str(frequence_lower))
+    entries["frequence_lower"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
     ttk.Label(scrollable_frame, text="Filtered Data Settings", font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 5))
     row += 1
 
@@ -236,13 +255,6 @@ def show_settings():
     ttk.Label(scrollable_frame, text="Show Filtered FFT in Spectrum:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
     entries["show_filtered_fft"] = ttk.Checkbutton(scrollable_frame, variable=show_filtered_fft_var)
     entries["show_filtered_fft"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
-    row += 1
-
-    ttk.Label(scrollable_frame, text="Filter Type:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    filter_options = ["low_pass", "high_pass", "band_pass", "band_stop"]
-    filter_type_var = tk.StringVar(value=filter_type)
-    entries["filter_type"] = ttk.Combobox(scrollable_frame, values=filter_options, textvariable=filter_type_var, width=15)
-    entries["filter_type"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
     # 新增參數
@@ -276,26 +288,26 @@ def show_settings():
                 "buffer_size": int(entries["buffer_size"].get()),
                 "mem_threshold_mb": int(entries["mem_threshold_mb"].get()),
                 "average_delay_time": int(entries["average_delay_time"].get()),
-                "max_bpm": int(entries["max_bpm"].get()),
-                "min_bpm": int(entries["min_bpm"].get()),
+                "frequence_upper": float(entries["frequence_upper"].get()),
+                "frequence_lower": float(entries["frequence_lower"].get()),
                 "fft_freq_range": [float(entries["fft_freq_min"].get()), float(entries["fft_freq_max"].get())],
                 "fft_amp_range": [float(entries["fft_amp_min"].get()), float(entries["fft_amp_max"].get())],
                 "show_filtered_data": show_filter_var.get(),
                 "filtered_data_baseline": float(entries["filtered_data_baseline"].get()),
                 "show_filtered_fft": show_filtered_fft_var.get(),
-                "filter_type": entries["filter_type"].get(),  # 新增濾波器類型
+                "filter_type": entries["filter_type"].get(),
                 "remove_dc": remove_dc_var.get(),
-
             }
-            
+    
             # 儲存設定到 config.json
             save_config(new_config)
-            
+    
             # 更新全域變數
             global device_chan, fs, record_len, chunk_size, buffer_size, mem_threshold_mb
-            global average_delay_time, max_bpm, min_bpm, fft_freq_range, fft_amp_range
+            global average_delay_time, frequence_upper, frequence_lower, fft_freq_range, fft_amp_range
             global show_filtered_data, filtered_data_baseline, window_time
-            
+            global filter_type, show_filtered_fft, remove_dc
+    
             device_chan = new_config["device_chan"]
             fs = new_config["fs"]
             record_len = new_config["record_len"]
@@ -303,15 +315,17 @@ def show_settings():
             buffer_size = new_config["buffer_size"]
             mem_threshold_mb = new_config["mem_threshold_mb"]
             average_delay_time = new_config["average_delay_time"]
-            max_bpm = new_config["max_bpm"]
-            min_bpm = new_config["min_bpm"]
+            frequence_upper = new_config["frequence_upper"]
+            frequence_lower = new_config["frequence_lower"]
             fft_freq_range = tuple(new_config["fft_freq_range"])
             fft_amp_range = tuple(new_config["fft_amp_range"])
             show_filtered_data = new_config["show_filtered_data"]
             filtered_data_baseline = new_config["filtered_data_baseline"]
+            show_filtered_fft = new_config["show_filtered_fft"]
+            filter_type = new_config["filter_type"]
+            remove_dc = new_config["remove_dc"]
             window_time = record_len / fs
-
-            # Show info, then ask if user wants to restart
+    
             if messagebox.askyesno("Success", "Settings saved! Do you want to restart the program now?"):
                 root.destroy()
                 plt.close('all')
@@ -323,7 +337,7 @@ def show_settings():
                 root.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Error occurred while saving settings: {str(e)}")
-
+    
     ttk.Button(button_frame, text="Save", command=save_settings).pack(side=tk.RIGHT, padx=5)
     ttk.Button(button_frame, text="Cancel", command=root.destroy).pack(side=tk.RIGHT, padx=5)
     # 移除 btn_restart，因為重啟功能已移到 messagebox

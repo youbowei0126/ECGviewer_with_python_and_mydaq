@@ -6,8 +6,8 @@
     "buffer_size": 60000,
     "mem_threshold_mb": 200,
     "average_delay_time": 5,
-    "max_bpm": 400,
-    "min_bpm": 30,
+    "frequence_upper": 2.0,
+    "frequence_lower": 0.5,
     "fft_freq_range": [
         0.1,
         10000.0
