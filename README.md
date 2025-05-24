@@ -36,6 +36,8 @@ This project is a Python tool that uses NI myDAQ for real-time data acquisition,
 pip install numpy matplotlib nidaqmx psutil
 ```
 
+[參考影片](https://www.youtube.com/watch?v=hQMl3SHMLjg)
+
 ### 4. 參數設定
 
 請編輯 [`config.json`](config.json) 檔案，調整硬體通道（`device_chan`）、取樣率（`fs`）、FFT 範圍等參數。
@@ -85,6 +87,8 @@ python run.py
 ```sh
 pip install numpy matplotlib nidaqmx psutil
 ```
+
+[reference video](https://www.youtube.com/watch?v=hQMl3SHMLjg)
 
 ### 4. Configuration Parameters
 
