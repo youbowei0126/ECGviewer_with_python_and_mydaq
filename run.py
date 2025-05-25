@@ -56,6 +56,9 @@ filtered_data_baseline = config["filtered_data_baseline"]  # 濾波過後的頻�
 show_filtered_fft=config["show_filtered_fft"]
 filter_type = config.get("filter_type", "band_pass")  # 預設為帶通濾波器
 remove_dc= config.get("remove_dc", True)  # 是否移除直流成分（零頻率）
+filter_model = config.get("filter_model", "ideal")  # 濾波器模型
+butter_order = config.get("butter_order", 4)  # Butterworth 階數
+ma_n = config.get("ma_n", 10)  # 移動平均窗口大小
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -472,6 +475,7 @@ plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
 def toggle(event):
     global running, freq_cum_sum, freq_cum_count, pause_time
     running = not running
+    print("Acquisition running:", running)
     if running:
         with buffer_lock:
             data_buffer.clear()
@@ -525,7 +529,7 @@ def update(frame):
     
     # 根據濾波器類型建立不同的遮罩
     if filter_type == "low_pass":
-        filter_model = config.get("filter_model", "ideal") if "filter_model" in config else "ideal"
+        filter_model = config.get("filter_model", "ideal")
         if filter_model == "ideal":
             mask = np.abs(freqs) <= max_freq
             if remove_dc:
