@@ -59,6 +59,7 @@ remove_dc= config.get("remove_dc", True)  # 是否移除直流成分（零頻率
 filter_model = config.get("filter_model", "ideal")  # 濾波器模型
 butter_order = config.get("butter_order", 4)  # Butterworth 階數
 ma_n = config.get("ma_n", 10)  # 移動平均窗口大小
+
 # 計算窗口時間
 window_time = record_len / fs
 initial_error = 1.0 / window_time
@@ -98,11 +99,107 @@ def read_worker(stop_event):
                 time.sleep(0.1)
 
 
-# 設定視窗 (新增)
+# 濾波器函數
+def apply_filter(data, filter_type, filter_model, fs, freq_lower, freq_upper, butter_order=4, ma_n=10, remove_dc=True):
+    """
+    應用不同類型和模型的濾波器
+    
+    Parameters:
+    - data: 輸入信號
+    - filter_type: 濾波器類型 ("low_pass", "high_pass", "band_pass", "band_stop")
+    - filter_model: 濾波器模型 ("ideal", "butterworth", "moving_average")
+    - fs: 採樣頻率
+    - freq_lower: 下限頻率
+    - freq_upper: 上限頻率
+    - butter_order: Butterworth 濾波器階數
+    - ma_n: 移動平均窗口大小
+    - remove_dc: 是否移除直流成分
+    """
+    
+    if filter_model == "ideal":
+        # 理想濾波器 (FFT-based)
+        N = len(data)
+        fft_data = np.fft.fft(data)
+        freqs = np.fft.fftfreq(N, d=1/fs)
+        
+        # 根據濾波器類型建立遮罩
+        if filter_type == "low_pass":
+            mask = np.abs(freqs) <= freq_upper
+        elif filter_type == "high_pass":
+            mask = np.abs(freqs) >= freq_lower
+        elif filter_type == "band_pass":
+            mask = (np.abs(freqs) >= freq_lower) & (np.abs(freqs) <= freq_upper)
+        elif filter_type == "band_stop":
+            mask = (np.abs(freqs) <= freq_lower) | (np.abs(freqs) >= freq_upper)
+        else:
+            mask = np.ones_like(freqs, dtype=bool)
+        
+        if remove_dc:
+            mask = mask & (freqs != 0)
+        
+        fft_data_filtered = fft_data * mask
+        filtered = np.fft.ifft(fft_data_filtered).real
+        
+    elif filter_model == "butterworth":
+        # Butterworth 濾波器
+        nyquist = fs / 2
+        
+        if filter_type == "low_pass":
+            if freq_upper >= nyquist:
+                freq_upper = nyquist * 0.99
+            b, a = scipy.signal.butter(butter_order, freq_upper/nyquist, btype='low')
+        elif filter_type == "high_pass":
+            if freq_lower <= 0:
+                freq_lower = 0.01
+            b, a = scipy.signal.butter(butter_order, freq_lower/nyquist, btype='high')
+        elif filter_type == "band_pass":
+            if freq_lower <= 0:
+                freq_lower = 0.01
+            if freq_upper >= nyquist:
+                freq_upper = nyquist * 0.99
+            b, a = scipy.signal.butter(butter_order, [freq_lower/nyquist, freq_upper/nyquist], btype='band')
+        elif filter_type == "band_stop":
+            if freq_lower <= 0:
+                freq_lower = 0.01
+            if freq_upper >= nyquist:
+                freq_upper = nyquist * 0.99
+            b, a = scipy.signal.butter(butter_order, [freq_lower/nyquist, freq_upper/nyquist], btype='bandstop')
+        else:
+            # 如果類型不正確，返回原始數據
+            filtered = data.copy()
+            
+        if 'b' in locals() and 'a' in locals():
+            filtered = scipy.signal.filtfilt(b, a, data)
+        else:
+            filtered = data.copy()
+            
+        if remove_dc:
+            filtered = filtered - np.mean(filtered)
+            
+    elif filter_model == "moving_average":
+        # 移動平均濾波器 (只適用於低通濾波)
+        if filter_type == "low_pass":
+            filtered = np.convolve(data, np.ones(ma_n)/ma_n, mode='same')
+        else:
+            # 移動平均只能做低通，其他類型回退到理想濾波器
+            print(f"警告：移動平均濾波器不支援 {filter_type}，改用理想濾波器")
+            return apply_filter(data, filter_type, "ideal", fs, freq_lower, freq_upper, butter_order, ma_n, remove_dc)
+        
+        if remove_dc:
+            filtered = filtered - np.mean(filtered)
+    else:
+        # 未知模型，返回原始數據
+        filtered = data.copy()
+    
+    return filtered
+
+
+# 設定視窗 (修改)
 def show_settings():
     global device_chan, fs, record_len, chunk_size, buffer_size, mem_threshold_mb
     global average_delay_time, max_bpm, min_bpm, fft_freq_range, fft_amp_range
     global show_filtered_data, filtered_data_baseline, window_time
+    global filter_type, filter_model, butter_order, ma_n, remove_dc
     
     # 暫停數據擷取
     was_running = running
@@ -185,16 +282,8 @@ def show_settings():
     entries["average_delay_time"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
-    # ttk.Label(scrollable_frame, text="Min BPM:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    # entries["min_bpm"] = ttk.Entry(scrollable_frame, width=15)
-    # entries["min_bpm"].insert(0, str(min_bpm))
-    # entries["min_bpm"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
-    # row += 1
-
     ttk.Label(scrollable_frame, text="Filter Settings", font=("Arial", 12, "bold")).grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 5))
     row += 1
-
-
 
     # Filter Type
     ttk.Label(scrollable_frame, text="Filter Type:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
@@ -204,38 +293,38 @@ def show_settings():
     entries["filter_type"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
-    # 新增 frequence_upper (Hz) 在 filter 下方
+    # Filter Model - 適用於所有濾波器類型
+    ttk.Label(scrollable_frame, text="Filter Model:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    filter_model_options = ["ideal", "butterworth", "moving_average"]
+    filter_model_var = tk.StringVar(value=filter_model)
+    entries["filter_model"] = ttk.Combobox(scrollable_frame, values=filter_model_options, textvariable=filter_model_var, width=15)
+    entries["filter_model"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    row += 1
+
+    # 新增 frequence_upper (Hz)
     ttk.Label(scrollable_frame, text="Frequency Upper (Hz):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
     entries["frequence_upper"] = ttk.Entry(scrollable_frame, width=15)
     entries["frequence_upper"].insert(0, str(frequence_upper))
     entries["frequence_upper"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
-    # 新增 frequence_lower (Hz) 在 filter 下方
+    # 新增 frequence_lower (Hz)
     ttk.Label(scrollable_frame, text="Frequency Lower (Hz):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
     entries["frequence_lower"] = ttk.Entry(scrollable_frame, width=15)
     entries["frequence_lower"].insert(0, str(frequence_lower))
     entries["frequence_lower"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
-    # Filter Model (only for low_pass)
-    ttk.Label(scrollable_frame, text="Filter Model (Low Pass):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    filter_model_options = ["ideal", "butterworth", "moving_average"]
-    filter_model_var = tk.StringVar(value=config.get("filter_model", "ideal"))
-    entries["filter_model"] = ttk.Combobox(scrollable_frame, values=filter_model_options, textvariable=filter_model_var, width=15)
-    entries["filter_model"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
-    row += 1
-
     # Butterworth order
     ttk.Label(scrollable_frame, text="Butterworth Order:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    butter_order_var = tk.IntVar(value=config.get("butter_order", 4))
+    butter_order_var = tk.IntVar(value=butter_order)
     entries["butter_order"] = ttk.Entry(scrollable_frame, width=15, textvariable=butter_order_var)
     entries["butter_order"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
     # Moving average n
     ttk.Label(scrollable_frame, text="Moving Average N:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    ma_n_var = tk.IntVar(value=config.get("ma_n", 10))
+    ma_n_var = tk.IntVar(value=ma_n)
     entries["ma_n"] = ttk.Entry(scrollable_frame, width=15, textvariable=ma_n_var)
     entries["ma_n"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
@@ -270,19 +359,14 @@ def show_settings():
     entries["fft_amp_max"].grid(row=display_row, column=display_col + 1, sticky="w", padx=5, pady=5)
     display_row += 1
 
-
-
-
-    show_filtered_fft_var = tk.BooleanVar(value=getattr(config, "show_filtered_fft", True))
+    show_filtered_fft_var = tk.BooleanVar(value=show_filtered_fft)
     ttk.Label(scrollable_frame, text="Show Filtered FFT in Spectrum:").grid(row=display_row, column=display_col, sticky="w", padx=5, pady=5)
     entries["show_filtered_fft"] = ttk.Checkbutton(scrollable_frame, variable=show_filtered_fft_var)
     entries["show_filtered_fft"].grid(row=display_row, column=display_col + 1, sticky="w", padx=5, pady=5)
     display_row += 1
 
-
     ttk.Label(scrollable_frame, text="Waveform Display Settings", font=("Arial", 12, "bold")).grid(row=display_row, column=display_col, columnspan=2, sticky="w", pady=(10, 5))
     display_row += 1
-    
     
     show_filter_var = tk.BooleanVar(value=show_filtered_data)
     ttk.Label(scrollable_frame, text="Show Filtered Data:").grid(row=display_row, column=display_col, sticky="w", padx=5, pady=5)
@@ -296,28 +380,15 @@ def show_settings():
     entries["filtered_data_baseline"].grid(row=display_row, column=display_col + 1, sticky="w", padx=5, pady=5)
     display_row += 1
 
-    # 新增參數
-    remove_dc = config.get("remove_dc", True)
-
-    # 在設定視窗加入選項
     remove_dc_var = tk.BooleanVar(value=remove_dc)
-    ttk.Label(scrollable_frame, text="Remove DC (zero frequency):").grid(row=display_row, column=display_col , sticky="w", padx=5, pady=5)
+    ttk.Label(scrollable_frame, text="Remove DC (zero frequency):").grid(row=display_row, column=display_col, sticky="w", padx=5, pady=5)
     entries["remove_dc"] = ttk.Checkbutton(scrollable_frame, variable=remove_dc_var)
     entries["remove_dc"].grid(row=display_row, column=display_col + 1, sticky="w", padx=5, pady=5)
     display_row += 1
 
-
     button_frame = ttk.Frame(root)
     button_frame.pack(fill=tk.X, padx=10, pady=10)
     
-    # def restart_program():
-    #     root.destroy()
-    #     plt.close('all')
-    #     stop_event.set()
-    #     reader.join()
-    #     python = sys.executable
-    #     os.execl(python, python, *sys.argv)
-
     def save_settings():
         try:
             new_config = {
@@ -368,9 +439,9 @@ def show_settings():
             show_filtered_fft = new_config["show_filtered_fft"]
             filter_type = new_config["filter_type"]
             remove_dc = new_config["remove_dc"]
-            filter_model = new_config.get("filter_model", "ideal")
-            butter_order = new_config.get("butter_order", 4)
-            ma_n = new_config.get("ma_n", 10)
+            filter_model = new_config["filter_model"]
+            butter_order = new_config["butter_order"]
+            ma_n = new_config["ma_n"]
             window_time = record_len / fs
     
             if messagebox.askyesno("Success", "Settings saved! Do you want to restart the program now?"):
@@ -387,7 +458,6 @@ def show_settings():
     
     ttk.Button(button_frame, text="Save", command=save_settings).pack(side=tk.RIGHT, padx=5)
     ttk.Button(button_frame, text="Cancel", command=root.destroy).pack(side=tk.RIGHT, padx=5)
-    # 移除 btn_restart，因為重啟功能已移到 messagebox
 
     root.mainloop()
 
@@ -444,7 +514,6 @@ btn_toggle = Button(
     hovercolor="0.975",  # 滑鼠移上去的顏色
 )
 
-
 # 主圖
 ax = fig.add_subplot(gs[1, 0:2])  # 主圖區
 x_axis = np.linspace(-window_time, 0, record_len)
@@ -453,8 +522,8 @@ freq_text = ax.text(0.02, 0.95, "", transform=ax.transAxes, va="top")
 
 # 設定主圖
 ax.set_xlim(-window_time, 0)
-ax.set_ylim(0, 5)
-# ax.set_ylim(0.8, 1.2)
+ax.set_ylim(0.5, 2.5)
+ax.set
 ax.set_xlabel("Time (s)")
 ax.set_ylabel("Voltage (V)")
 ax.set_title("Real-Time Waveform & Frequency Estimation")
@@ -519,54 +588,22 @@ def update(frame):
 
     line.set_ydata(raw)
 
-    # 設定各種濾波器，根據 filter_type 決定使用哪種濾波器
+    # 使用新的濾波器函數
     min_freq = min_bpm / 60.0
     max_freq = max_bpm / 60.0
-    # FFT
-    N = len(raw_3s)
-    fft_data = np.fft.fft(raw_3s)
-    freqs = np.fft.fftfreq(N, d=1 / fs)
     
-    # 根據濾波器類型建立不同的遮罩
-    if filter_type == "low_pass":
-        filter_model = config.get("filter_model", "ideal")
-        if filter_model == "ideal":
-            mask = np.abs(freqs) <= max_freq
-            if remove_dc:
-                mask = mask & (freqs != 0)
-            fft_data_filtered = fft_data * mask
-            filtered = np.fft.ifft(fft_data_filtered).real
-        elif filter_model == "butterworth":
-            butter_order = config.get("butter_order", 4) if "butter_order" in config else 4
-            b, a = scipy.signal.butter(butter_order, max_freq/(fs/2), btype='low')
-            filtered = scipy.signal.filtfilt(b, a, raw_3s)
-            if remove_dc:
-                filtered = filtered - np.mean(filtered)
-        elif filter_model == "moving_average":
-            ma_n = config.get("ma_n", 10) if "ma_n" in config else 10
-            filtered = np.convolve(raw_3s, np.ones(ma_n)/ma_n, mode='same')
-            if remove_dc:
-                filtered = filtered - np.mean(filtered)
-        else:
-            mask = np.abs(freqs) <= max_freq
-            if remove_dc:
-                mask = mask & (freqs != 0)
-            fft_data_filtered = fft_data * mask
-            filtered = np.fft.ifft(fft_data_filtered).real
-    else:
-        # 其餘 filter_type 保持原本邏輯
-        if filter_type == "high_pass":
-            mask = np.abs(freqs) >= min_freq
-        elif filter_type == "band_pass":
-            mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
-        elif filter_type == "band_stop":
-            mask = (np.abs(freqs) <= min_freq) | (np.abs(freqs) >= max_freq)
-        else:
-            mask = (np.abs(freqs) >= min_freq) & (np.abs(freqs) <= max_freq)
-        if remove_dc:
-            mask = mask & (freqs != 0)
-        fft_data_filtered = fft_data * mask
-        filtered = np.fft.ifft(fft_data_filtered).real
+    # 應用濾波器
+    filtered = apply_filter(
+        raw_3s, 
+        filter_type, 
+        filter_model, 
+        fs, 
+        frequence_lower, 
+        frequence_upper, 
+        butter_order, 
+        ma_n, 
+        remove_dc
+    )
 
     # 計算過零點頻率
     detrended = filtered - np.mean(filtered)
@@ -580,6 +617,7 @@ def update(frame):
         zero_cross_freq = 1.0 / period if period > 0 else 0.0
     else:
         zero_cross_freq = 0.0
+        
     # 計算FFT，僅使用前三秒的資料
     if running:  # 僅在開始時更新FFT
         N = len(raw_3s)
@@ -614,7 +652,7 @@ def update(frame):
 
         ax_fft.plot(pos_freqs, pos_signal_fft, label="Raw FFT")
         if show_filtered_fft:
-            ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="red", linestyle="--",lw=3)
+            ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="red", linestyle="--", lw=3)
         ax_fft.set_title("FFT Frequency Spectrum")
         ax_fft.set_xlabel("Frequency (Hz)")
         ax_fft.set_ylabel("Magnitude")
@@ -623,6 +661,7 @@ def update(frame):
         ax_fft.set_ylim(*fft_amp_range)
         ax_fft.grid(which="minor", axis="both", linestyle=":")
         ax_fft.legend()
+        
         # find main_freq
         if len(pos_signal_fft) > 0:
             max_index = pos_signal_fft.argmax()
@@ -686,7 +725,7 @@ def update(frame):
 
 # 設置每10ms更新一次
 ani = animation.FuncAnimation(fig, update, interval=10)
-# , blit=True
+
 try:
     plt.tight_layout()
     plt.show()

@@ -7,7 +7,7 @@
     "mem_threshold_mb": 200,
     "average_delay_time": 5,
     "frequence_upper": 30.0,
-    "frequence_lower": 0.0,
+    "frequence_lower": 0.5,
     "fft_freq_range": [
         0.1,
         10000.0
@@ -21,7 +21,7 @@
     "show_filtered_fft": true,
     "filter_type": "low_pass",
     "remove_dc": true,
-    "filter_model": "moving_average",
-    "butter_order": 4,
+    "filter_model": "butterworth",
+    "butter_order": 10,
     "ma_n": 70
 }
