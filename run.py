@@ -58,7 +58,7 @@ filter_type = config.get("filter_type", "band_pass")  # 預設為帶通濾波器
 remove_dc= config.get("remove_dc", True)  # 是否移除直流成分（零頻率）
 filter_model = config.get("filter_model", "ideal")  # 濾波器模型
 butter_order = config.get("butter_order", 4)  # Butterworth 階數
-ma_n = config.get("ma_n", 10)  # 移動平均窗口大小
+fir_numtaps = config.get("fir_numtaps", 51)  # FIR 濾波器 tap 數（刪除 ma_n）
 
 # 計算窗口時間
 window_time = record_len / fs
@@ -100,19 +100,19 @@ def read_worker(stop_event):
 
 
 # 濾波器函數
-def apply_filter(data, filter_type, filter_model, fs, freq_lower, freq_upper, butter_order=4, ma_n=10, remove_dc=True):
+def apply_filter(data, filter_type, filter_model, fs, freq_lower, freq_upper, butter_order=4, fir_numtaps=51, remove_dc=True):
     """
     應用不同類型和模型的濾波器
     
     Parameters:
     - data: 輸入信號
     - filter_type: 濾波器類型 ("low_pass", "high_pass", "band_pass", "band_stop")
-    - filter_model: 濾波器模型 ("ideal", "butterworth", "moving_average")
+    - filter_model: 濾波器模型 ("ideal", "butterworth", "fir")
     - fs: 採樣頻率
     - freq_lower: 下限頻率
     - freq_upper: 上限頻率
     - butter_order: Butterworth 濾波器階數
-    - ma_n: 移動平均窗口大小
+    - fir_numtaps: FIR 濾波器 tap 數
     - remove_dc: 是否移除直流成分
     """
     
@@ -176,19 +176,44 @@ def apply_filter(data, filter_type, filter_model, fs, freq_lower, freq_upper, bu
         if remove_dc:
             filtered = filtered - np.mean(filtered)
             
-    elif filter_model == "moving_average":
-        # 移動平均濾波器 (只適用於低通濾波)
-        if filter_type == "low_pass":
-            filtered = np.convolve(data, np.ones(ma_n)/ma_n, mode='same')
-        else:
-            # 移動平均只能做低通，其他類型回退到理想濾波器
-            print(f"警告：移動平均濾波器不支援 {filter_type}，改用理想濾波器")
-            return apply_filter(data, filter_type, "ideal", fs, freq_lower, freq_upper, butter_order, ma_n, remove_dc)
+    elif filter_model == "fir":
+        # FIR 濾波器 (使用窗函數法)
+        try:
+            if filter_type == "low_pass":
+                # 低通濾波器
+                coeffs = scipy.signal.firwin(fir_numtaps, cutoff=freq_upper, fs=fs, pass_zero='lowpass')
+            elif filter_type == "high_pass":
+                # 高通濾波器
+                coeffs = scipy.signal.firwin(fir_numtaps, cutoff=freq_lower, fs=fs, pass_zero='highpass')
+            elif filter_type == "band_pass":
+                # 帶通濾波器
+                if freq_lower >= freq_upper:
+                    print(f"警告：freq_lower ({freq_lower}) >= freq_upper ({freq_upper})，使用預設值")
+                    freq_lower = freq_upper * 0.1
+                coeffs = scipy.signal.firwin(fir_numtaps, cutoff=[freq_lower, freq_upper], fs=fs, pass_zero='bandpass')
+            elif filter_type == "band_stop":
+                # 帶阻濾波器
+                if freq_lower >= freq_upper:
+                    print(f"警告：freq_lower ({freq_lower}) >= freq_upper ({freq_upper})，使用預設值")
+                    freq_lower = freq_upper * 0.1
+                coeffs = scipy.signal.firwin(fir_numtaps, cutoff=[freq_lower, freq_upper], fs=fs, pass_zero='bandstop')
+            else:
+                print(f"警告：未知的濾波器類型 {filter_type}，返回原始數據")
+                filtered = data.copy()
+                return filtered
+            
+            # 應用 FIR 濾波器
+            filtered = scipy.signal.lfilter(coeffs, 1.0, data)
+            
+        except Exception as e:
+            print(f"FIR 濾波器錯誤：{e}，改用理想濾波器")
+            return apply_filter(data, filter_type, "ideal", fs, freq_lower, freq_upper, butter_order, fir_numtaps, remove_dc)
         
         if remove_dc:
             filtered = filtered - np.mean(filtered)
     else:
         # 未知模型，返回原始數據
+        print(f"警告：未知的濾波器模型 {filter_model}，返回原始數據")
         filtered = data.copy()
     
     return filtered
@@ -199,7 +224,7 @@ def show_settings():
     global device_chan, fs, record_len, chunk_size, buffer_size, mem_threshold_mb
     global average_delay_time, max_bpm, min_bpm, fft_freq_range, fft_amp_range
     global show_filtered_data, filtered_data_baseline, window_time
-    global filter_type, filter_model, butter_order, ma_n, remove_dc
+    global filter_type, filter_model, butter_order, remove_dc, fir_numtaps
     
     # 暫停數據擷取
     was_running = running
@@ -295,7 +320,7 @@ def show_settings():
 
     # Filter Model - 適用於所有濾波器類型
     ttk.Label(scrollable_frame, text="Filter Model:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    filter_model_options = ["ideal", "butterworth", "moving_average"]
+    filter_model_options = ["ideal", "butterworth", "fir"]
     filter_model_var = tk.StringVar(value=filter_model)
     entries["filter_model"] = ttk.Combobox(scrollable_frame, values=filter_model_options, textvariable=filter_model_var, width=15)
     entries["filter_model"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
@@ -323,10 +348,10 @@ def show_settings():
     row += 1
 
     # Moving average n
-    ttk.Label(scrollable_frame, text="Moving Average N:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-    ma_n_var = tk.IntVar(value=ma_n)
-    entries["ma_n"] = ttk.Entry(scrollable_frame, width=15, textvariable=ma_n_var)
-    entries["ma_n"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
+    ttk.Label(scrollable_frame, text="Fir Numtaps\n(should be odd):").grid(row=row, column=0, sticky="w", padx=5, pady=5)
+    fir_numtaps_var = tk.IntVar(value=fir_numtaps)
+    entries["fir_numtaps"] = ttk.Entry(scrollable_frame, width=15, textvariable=fir_numtaps_var)
+    entries["fir_numtaps"].grid(row=row, column=1, sticky="w", padx=5, pady=5)
     row += 1
 
     # --- 將 Display Settings 移到第二欄 ---
@@ -410,19 +435,19 @@ def show_settings():
                 "remove_dc": remove_dc_var.get(),
                 "filter_model": entries["filter_model"].get(),
                 "butter_order": int(entries["butter_order"].get()),
-                "ma_n": int(entries["ma_n"].get()),
+                "fir_numtaps": int(entries["fir_numtaps"].get()),  # 改為 fir_numtaps
             }
-    
+
             # 儲存設定到 config.json
             save_config(new_config)
-    
+
             # 更新全域變數
             global device_chan, fs, record_len, chunk_size, buffer_size, mem_threshold_mb
             global average_delay_time, frequence_upper, frequence_lower, fft_freq_range, fft_amp_range
             global show_filtered_data, filtered_data_baseline, window_time
             global filter_type, show_filtered_fft, remove_dc
-            global filter_model, butter_order, ma_n
-    
+            global filter_model, butter_order, fir_numtaps  # 改為 fir_numtaps
+
             device_chan = new_config["device_chan"]
             fs = new_config["fs"]
             record_len = new_config["record_len"]
@@ -441,9 +466,9 @@ def show_settings():
             remove_dc = new_config["remove_dc"]
             filter_model = new_config["filter_model"]
             butter_order = new_config["butter_order"]
-            ma_n = new_config["ma_n"]
+            fir_numtaps = new_config["fir_numtaps"]  # 改為 fir_numtaps
             window_time = record_len / fs
-    
+
             if messagebox.askyesno("Success", "Settings saved! Do you want to restart the program now?"):
                 root.destroy()
                 plt.close('all')
@@ -601,9 +626,10 @@ def update(frame):
         frequence_lower, 
         frequence_upper, 
         butter_order, 
-        ma_n, 
+        fir_numtaps,  # 改為 fir_numtaps
         remove_dc
     )
+
 
     # 計算過零點頻率
     detrended = filtered - np.mean(filtered)
@@ -646,10 +672,33 @@ def update(frame):
         # 新增：在 min_bpm~max_bpm 對應的頻率區間加上半透明底色
         min_freq_band = min_bpm / 60.0
         max_freq_band = max_bpm / 60.0
-        ax_fft.axvspan(
-            min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range"
-        )
-
+        if filter_type == "band_pass":
+        
+            ax_fft.axvspan(
+                min_freq_band, max_freq_band, color="orange", alpha=0.3, label="BPM Range"
+            )
+        elif filter_type == "band_stop":
+            ax_fft.axvspan(
+                0, min_freq_band, color="orange", alpha=0.3, label="BPM Range"
+            )
+            ax_fft.axvspan(
+                max_freq_band, max_f, color="orange", alpha=0.3, label="BPM Range"
+            )
+            
+        elif filter_type == "low_pass":
+            ax_fft.axvspan(
+                0, max_freq_band, color="orange", alpha=0.3, label="BPM Range"
+            )
+        elif filter_type == "high_pass":
+            ax_fft.axvspan(
+                min_freq_band, max_f, color="orange", alpha=0.3, label="BPM Range"
+            )
+        else:
+            ax_fft.axvspan(
+                0, max_f, color="orange", alpha=0.3, label="BPM Range"
+            )
+            
+            
         ax_fft.plot(pos_freqs, pos_signal_fft, label="Raw FFT")
         if show_filtered_fft:
             ax_fft.plot(pos_freqs, pos_filtered_fft, label="Filtered FFT", color="red", linestyle="--", lw=3)
@@ -658,7 +707,8 @@ def update(frame):
         ax_fft.set_ylabel("Magnitude")
         ax_fft.grid(True)
         ax_fft.loglog()
-        ax_fft.set_ylim(*fft_amp_range)
+        # ax_fft.set_ylim(*fft_amp_range)
+        ax_fft.set_ylim(1e-5,1e5)
         ax_fft.grid(which="minor", axis="both", linestyle=":")
         ax_fft.legend()
         

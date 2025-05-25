@@ -2,12 +2,12 @@
     "device_chan": "myDAQ1_youyouyou/ai0",
     "fs": 1000.0,
     "record_len": 3000,
-    "chunk_size": 500,
+    "chunk_size": 25,
     "buffer_size": 60000,
     "mem_threshold_mb": 200,
     "average_delay_time": 5,
-    "frequence_upper": 30.0,
-    "frequence_lower": 0.5,
+    "frequence_upper": 75.0,
+    "frequence_lower": 45.0,
     "fft_freq_range": [
         0.1,
         10000.0
@@ -19,9 +19,9 @@
     "show_filtered_data": true,
     "filtered_data_baseline": 1.0,
     "show_filtered_fft": true,
-    "filter_type": "low_pass",
+    "filter_type": "band_stop",
     "remove_dc": true,
-    "filter_model": "butterworth",
+    "filter_model": "fir",
     "butter_order": 10,
-    "ma_n": 70
+    "fir_numtaps": 101
 }
